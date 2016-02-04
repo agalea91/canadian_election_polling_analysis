@@ -1,0 +1,11 @@
+statistics by province (converted to csv files):
+http://www.cbc.ca/news2/interactives/poll-tracker/2015/index.html#regions
+http://www.cbc.ca/news2/interactives/results-2015/
+
+statistics about polling (converted to csv files):
+http://www.sfu.ca/~aheard/elections/polls.html
+http://www.sfu.ca/~aheard/elections/polls-2011.html
+http://www.sfu.ca/~aheard/elections/polls-2008.html
+http://www.sfu.ca/~aheard/elections/polls-2006.html
+http://www.sfu.ca/~aheard/elections/polls-2004.html
+http://www.sfu.ca/~aheard/elections/polls-2000.html
