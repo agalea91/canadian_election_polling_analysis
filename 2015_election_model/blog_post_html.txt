@@ -1,0 +1,276 @@
+The Liberal Party (LIB), headed by Justin Trudeau, won last years national election on October 19th by a landslide and secured a majority government.  The two other most popular political parties were the Conservative Party of Canada (CPC) and the New Democratic Party (NDP).  Here we look at a model that uses a large accumulation of polling statistics and determine winning probabilities for each of these parties.  The projection data was posted just one day prior to the election on <a href="http://www.cbc.ca/news2/interactives/poll-tracker/2015/index.html" target="_blank">this CBC webpage</a> (and was determined by Éric Grenier at ThreeHundredEight.com).
+
+In terms of the number of seats won, a "likely outcome" range is given for each party along with an "expected value" and "best/wost case" limits.  The Pandas data analysis library for Python 3 was used to express this information in a dataframe named "all_prob_data":
+
+<img class=" size-full wp-image-487 aligncenter" src="https://galeascience.files.wordpress.com/2016/02/dataframe2.png" alt="dataframe" width="369" height="128" />
+
+In each case the "Low" and "High" values are not equally spaced from the "Expected".  To account for this, we will create probability distributions that are asymmetric.  First we need to extract the differences for each case:
+
+[code language="python"]
+# get the differences between the predicted expectation
+# and the high and low limits
+
+dif_low = [all_prob_data.loc[i,'Expected']
+           - all_prob_data.loc[i,'Low']
+           for i in all_prob_data.index]
+
+dif_high = [all_prob_data.loc[i,'High']
+            - all_prob_data.loc[i,'Expected']
+            for i in all_prob_data.index]
+
+print(dif_low, 'and', dif_high)
+[/code]
+<blockquote>&gt; &gt; [18, 15, 22] and [21, 24, 15]</blockquote>
+&nbsp;
+
+We should also define the following constants:
+
+[code language="python"]
+# the maximum available seats and
+# the number of seats required to have a majority government
+max_seats = 338
+maj_seats = 170
+
+# allocate a set number of seats for
+# the Bloc Quebecois and Green parties
+other_seats = 8
+[/code]
+
+&nbsp;
+
+I'll determine probability distributions - representing the projected number of seats won for each party - by stitching two Gaussian functions together at the "Expected" value and choosing the standard deviations for the left and right sides based on the "Low" and "High" differences respectively.
+
+[code language="python"]
+# set the width factor that relates the
+# standard deviation to our differences
+wfac = 1.5
+
+# get the center points for each Gaussian
+centers = [all_prob_data.loc[i,'Expected']
+           for i in all_prob_data.index]
+
+# build two Gaussians for the left (low) and right (high) sides
+# I'm using the scipy package imported as sp
+norm_low = lambda i: sp.stats.norm(loc=centers[i],scale=dif_low[i]/wfac)
+norm_high = lambda i: sp.stats.norm(loc=centers[i],scale=dif_high[i]/wfac)
+
+# re-size each to match at a height of 1
+# and then merge into one function
+resize_pdf_low = lambda i, x: norm_low(i).pdf(x)*1.0/norm_low(i).pdf(centers[i])
+resize_pdf_high = lambda i, x: norm_high(i).pdf(x)*1.0/norm_high(i).pdf(centers[i])
+merge_pdfs = lambda i, x: resize_pdf_low(i,x) if x &lt;= centers[i] else resize_pdf_high(i,x)
+
+# plot the model
+plt.figure(figsize=(12,5))
+party_colors = ['blue', 'orange', 'red']
+# I'm using the numpy package imported as np
+xpts = np.linspace(0, max_seats, 1000)
+for i in all_prob_data.index:
+    plt.plot(xpts, [merge_pdfs(i,x) for x in xpts], color=party_colors[i],
+             alpha=0.7, label=all_prob_data.loc[i,'Party'])
+plt.xlim(20, 200)
+plt.ylim(0, 1.05)
+plt.vlines(maj_seats, 0, 2, color='black', alpha=0.7, label='Majority')
+box = dict(boxstyle='square', facecolor='lightgrey', alpha=0.7)
+plt.legend(loc='upper left', frameon=True)
+plt.xlabel('Number of seats in parliment', labelpad=20)
+plt.ylabel('Non-normalized probability', labelpad=20)
+plt.title('2015 Canadian election predictive model', y=1.05, fontsize=25)
+plt.savefig('random_sample.png', bbox_inches='tight', dpi=144)
+[/code]
+
+&nbsp;
+
+&nbsp;
+
+<img class=" size-full wp-image-753 aligncenter" src="https://galeascience.files.wordpress.com/2016/02/predictive_model1.png" alt="predictive_model" width="1534" height="780" />
+
+&nbsp;
+
+Although the width of each distribution is based on the predictive data, the exact relationship (i.e., $latex \sigma= $diff/wfac as seen above) was selected manually.  I chose wfac=1.5 which means that the "Low" to "High" range spans 1.5$latex \sigma$ (where $latex \sigma$ represents the standard deviation) and there is roughly an 87% chance of sampling this area.
+
+In order simulate an election, I discretized the distributions by seats (i.e., integers) and stored them in "weighted lists" that can be sampled using the Numpy library function np.random.choice (this simply returns a random element from a list, if we had a=[1,2,2,2,2,2,3] then np.random.choice(a, size=1) would most likely return the number 2).  The most likely choice from one of our "weighted lists" would be the "Expected" number of seats.
+
+[code language="python"]
+# goal: make a set of lists for each party that
+# can be sampled using np.random.choice
+
+# the discrete distributions
+discrete_pdfs = [[merge_pdfs(i,x) for x in range(max_seats)]
+                 for i in all_prob_data.index]
+
+hist_pdfs_dict = {}
+for i in all_prob_data.index:
+    hist_pdfs = [] # these are the 'weighted lists' to be used by np.random.choice
+    # iterate over x-axis locations
+    for j in range(max_seats):
+        # iterate over the height of each distribution
+        # at the particular x-axis location
+        for k in range(int(discrete_pdfs[i][j]*1000)):
+            # add an element into the bin at the x-axis location
+            hist_pdfs.append(j)
+    # store the 'weighted lists' in a dictionary
+    hist_pdfs_dict[all_prob_data.loc[i,'Party']] = hist_pdfs
+[/code]
+
+&nbsp;
+
+Now we can test how well the distributions are recreated based on the number of sampling points:
+
+[code language="python"]
+sns.set_style('white') # I'm using the seaborn package (imported as sns)
+party_colors_dict = {'CPC':'b', 'NDP':'orange', 'LIB':'r'}
+sizes = [100, 1000, 10000, 1000000] # the number of samples to take
+
+plt.figure(figsize=(10,8))
+for i in range(4):
+    marker = int('41'+str(i+1))
+    ax = plt.subplot(marker)
+    j = 0
+    for key in hist_pdfs_dict:
+        plt.hist(np.random.choice(hist_pdfs_dict[key], size=sizes[i]),
+                 bins=range(0,max_seats,1),
+                 color=party_colors_dict[key], alpha=0.5)
+        plt.xlim(30,180)
+        ax.set_yticklabels([])
+        ax.set_xticklabels([])
+        j += 1
+plt.subplots_adjust(hspace=0.05)
+plt.savefig('random_sample.png', bbox_inches='tight', dpi=144)
+[/code]
+
+&nbsp;
+
+<img class=" size-full wp-image-11 aligncenter" src="https://galeascience.files.wordpress.com/2016/02/random_sample.png" alt="random_sample" width="2385" height="1919" />
+
+&nbsp;
+
+The number of samples from each distribution in the above figure are (from top to bottom) one hundred, one thousand, ten thousand, and one million.
+
+To determine the (projected) probabilities of each party winning we will simulate a large number of elections.  The simulation of a single election is accomplished by independently sampling two distributions and then "false-sampling" the third by subtracting the number of allocated seats from the total available seats.  For example, given the total number of available seats is 338-8=330 (allocating 8 seats for the Bloc Quebecois and Green parties), if we sample the number of LIB and CPC seats as 140 and 120 then the number of NDP seats is "false-sampled" as 330-140-120=70.  The results of simulating 10,000 elections with this method (for each panel) are illustrated in the figure below:
+
+&nbsp;
+
+<img class="alignnone size-full wp-image-628" src="https://galeascience.files.wordpress.com/2016/02/false_sample_10k.png" alt="false_sample_10k" width="1549" height="1172" />
+
+&nbsp;
+
+Histograms show the resulting seat allocation distribution and the smooth lines mark the distributions we wish to sample.  In each case, the party that is "false-sampled" acquires a wider distribution than we would like.  As a friend (Willem Klumpenhower [1]) pointed out, this is to be expected because the standard deviations of the two properly sampled distributions are <a href="http://stats.stackexchange.com/questions/25848/how-to-sum-a-standard-deviation" target="_blank">added in quadrature</a> to give the "false-sampled" standard deviation.  Assuming each distribution we wish to sample has the same standard deviation (which is roughly the case) then the "false-sampled" distribution would always be wider by a factor of $latex \sqrt{2}$.
+
+A simple solution is to swap which party is "false-sampled" for each subsequent election in the simulation, thus causing each distribution to be an equal amount wider than expected.  The following figure was produced by simulating 1 million elections with this method.
+
+&nbsp;
+
+<img class="alignnone size-full wp-image-756" src="https://galeascience.files.wordpress.com/2016/02/mixed_false_samples_1mil1.png" alt="mixed_false_samples_1mil" width="1668" height="1225" />
+
+&nbsp;
+
+The results of this simulation are as follows:
+<ul>
+	<li>probability of winning the election - LIB: 81.7%, NDP: 0.2%, CPC: 18.1%</li>
+	<li>probability of winning a majority    - LIB: 2.05%, NDP: 0.0%, CPC: 0.05%</li>
+</ul>
+The model could easily be adjusted to make the distributions wider (or more narrow), which would increase (or decrease) the spread of probabilities across the parties.  The projected chance for a LIB majority government would certainly increase if the distribution were wider, but would still remain small.
+
+To conclude, I've included the election simulation code below:
+
+[code language="python"]
+# the function that assigns the number of seats for each party
+def RandomVotesMixed(p1, p2, false_sample):
+
+    # initialize seat numers to be zero and find correct
+    # indexes using the np.where function
+    p1_seats, p2_seats = 0, 0
+    p1_index = int(np.where(all_prob_data['Party'] == p1)[0])
+    p2_index = int(np.where(all_prob_data['Party'] == p2)[0])
+
+    # throw away guesses that are less than the
+    # predicted limits of the model
+    def outside_limits(p_seats, p_index):
+        return p_seats &lt; all_prob_data.loc[p_index,'Minimum'] or p_seats &gt; all_prob_data.loc[p_index,'Maximum']
+
+    while outside_limits(p1_seats, p1_index):
+        p1_seats = np.random.choice(hist_pdfs_dict[p1])
+    while outside_limits(p2_seats, p2_index):
+        p2_seats = np.random.choice(hist_pdfs_dict[p2])
+
+    false_sample_seats = max_seats - other_seats - p1_seats - p2_seats
+    # other_seats was set as 8 based on the CBC expected
+    # values for BQ and Green parties
+
+    return p1_seats, p2_seats, false_sample_seats
+[/code]
+
+&nbsp;
+
+[code language="python"]
+# the function that simulates the election multiple times
+def SimulateElection(numer_of_outcomes):
+
+    CPC_seats, NDP_seats, LIB_seats = [], [], []
+    CPC_win, NDP_win, LIB_win = 0, 0, 0
+    CPC_maj, NDP_maj, LIB_maj = 0, 0, 0
+    iswp = 1 # initialize the integer swap variable
+
+    for i in range(numer_of_outcomes):
+
+        if iswp == 1: # LIB will be falsely-sampled
+            CPC, NDP, LIB = RandomVotesMixed('CPC', 'NDP', 'LIB')
+        elif iswp == 2: # NDP will be falsely-sampled
+            LIB, CPC, NDP = RandomVotesMixed('LIB', 'CPC', 'NDP')
+        elif iswp == 3: # CPC will be falsely-sampled
+            NDP, LIB, CPC = RandomVotesMixed('NDP', 'LIB', 'CPC')
+
+        CPC_seats.append(CPC)
+        NDP_seats.append(NDP)
+        LIB_seats.append(LIB)
+        winner = max([CPC, NDP, LIB])
+        if winner == CPC:
+            CPC_win += 1
+            if winner &gt;= maj_seats:
+                CPC_maj += 1
+        elif winner == NDP:
+            NDP_win += 1
+            if winner &gt;= maj_seats:
+                NDP_maj += 1
+        elif winner == LIB:
+            LIB_win += 1
+            if winner &gt;= maj_seats:
+                LIB_maj += 1
+
+        if iswp == 1 or iswp == 2:
+            iswp += 1
+        else:
+            iswp = 1
+
+    winners = {'CPC':CPC_win, 'NDP':NDP_win, 'LIB':LIB_win}
+    majorities = {'CPC':CPC_maj, 'NDP':NDP_maj, 'LIB':LIB_maj}
+
+    return CPC_seats, NDP_seats, LIB_seats, winners, majorities
+[/code]
+
+&nbsp;
+
+[code language="python"]
+# calling the above function and returning the probabilities of
+# winning the election and winning a majority
+
+sampling_pts = 1000000
+CPC, NDP, LIB, winners, majorities = SimulateElection(sampling_pts)
+
+def prob(party):
+    return winners[party]/sampling_pts
+def probM(party):
+    return majorities[party]/sampling_pts
+
+probs = {'CPC':prob('CPC'), 'NDP':prob('NDP'), 'LIB':prob('LIB')}
+probsMaj = {'CPC':probM('CPC'), 'NDP':probM('NDP'), 'LIB':probM('LIB')}
+print(probs)
+print(probsMaj)
+[/code]
+
+&nbsp;
+
+Thanks for reading! You can find the entire ipython notebook document <a href="https://github.com/agalea91/canadian_election_polling_analysis/tree/master/2015_election_model" target="_blank">here</a>. If you would like to discuss any of the plots or have any questions or corrections, please write a comment. You are also welcome to email me at agalea91@gmail.com
+
+[1] Willem has a great blog about transportation, check it out <a href="http://klumpentown.com/" target="_blank">here</a>
